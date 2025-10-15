@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import nodemailer from "nodemailer";
-import SMTPPool from "nodemailer/lib/smtp-pool";
 import Razorpay from "razorpay";
 import crypto from "crypto";
+import { generateAdminEmailTemplate, generateAdminPaymentEmailTemplate, generatePaymentEmailTemplate, generateStudentEmailTemplate } from "./email-templates";
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -10,438 +9,161 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET!,
 });
 
-// Email queue for handling multiple requests
-interface EmailTask {
-  id: string;
-  data: {
-    name: string;
-    email: string;
-    mobile: string;
-    address?: string;
-    paymentId?: string;
-    orderId?: string;
-  };
-  attempts: number;
-  createdAt: Date;
-}
+// Email API configuration
+const EMAIL_API_URL = process.env.EMAIL_API_URL || "http://localhost:3000";
+const EMAIL_API_KEY = process.env.EMAIL_API_KEY;
 
-class EmailQueue {
-  private queue: EmailTask[] = [];
-  private isProcessing = false;
-  private maxAttempts = 3;
-  private retryDelay = 5000; // 5 seconds
-
-  async add(task: Omit<EmailTask, "id" | "attempts" | "createdAt">) {
-    const emailTask: EmailTask = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      data: task.data,
-      attempts: 0,
-      createdAt: new Date(),
-    };
-
-    this.queue.push(emailTask);
-    console.log(`📧 Email task added to queue: ${emailTask.id}`);
-
-    if (!this.isProcessing) {
-      this.processQueue();
-    }
+// Enhanced email sending function using your API
+async function sendEmailViaAPI(emailData: {
+  name: string;
+  email: string;
+  mobile: string;
+  address?: string;
+  paymentId?: string;
+  orderId?: string;
+}) {
+  if (!EMAIL_API_KEY) {
+    console.warn("EMAIL_API_KEY not configured, skipping email sending");
+    return { success: false, error: "Email API not configured" };
   }
 
-  private async processQueue() {
-    if (this.isProcessing || this.queue.length === 0) return;
+  try {
+    const isPaymentConfirmation = !!emailData.paymentId;
 
-    this.isProcessing = true;
+    // Student email
+    const studentEmailPayload = {
+      to: emailData.email,
+      subject: isPaymentConfirmation
+        ? "🎉 Payment Confirmed - Welcome to Python Wizard Course!"
+        : "🚀 Welcome to Python Wizard Course Enrollment!",
+      html: isPaymentConfirmation
+        ? generatePaymentEmailTemplate(emailData)
+        : generateStudentEmailTemplate(emailData),
+      priority: "high",
+    };
 
-    while (this.queue.length > 0) {
-      const task = this.queue[0];
+    // Admin email
+    const adminEmailPayload = {
+      to: process.env.ADMIN_EMAIL,
+      subject: isPaymentConfirmation
+        ? `💰 Payment Received - New Enrollment - ${emailData.name}`
+        : `🎯 New Python Course Enrollment - ${emailData.name}`,
+      html: isPaymentConfirmation
+        ? generateAdminPaymentEmailTemplate(emailData)
+        : generateAdminEmailTemplate(emailData),
+      priority: "normal",
+    };
 
-      try {
-        console.log(
-          `🔄 Processing email task: ${task.id} (Attempt ${task.attempts + 1})`
-        );
-        await sendEmailDirect(task.data);
+    // Send student email
+    const studentResponse = await fetch(`${EMAIL_API_URL}/send-email`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": EMAIL_API_KEY,
+      },
+      body: JSON.stringify(studentEmailPayload),
+    });
 
-        // Success - remove from queue
-        this.queue.shift();
-        console.log(`✅ Email sent successfully: ${task.id}`);
-      } catch (error) {
-        task.attempts++;
+    if (!studentResponse.ok) {
+      throw new Error(`Student email failed: ${studentResponse.statusText}`);
+    }
 
-        if (task.attempts >= this.maxAttempts) {
-          // Max attempts reached - remove from queue
-          this.queue.shift();
-          console.error(
-            `❌ Email failed after ${this.maxAttempts} attempts: ${task.id}`,
-            error
-          );
-        } else {
-          // Retry after delay
-          console.log(
-            `⏳ Retrying email ${task.id} in ${this.retryDelay}ms (Attempt ${task.attempts})`
-          );
-          await this.delay(this.retryDelay);
-        }
+    // Send admin email if admin email is configured
+    if (process.env.ADMIN_EMAIL) {
+      const adminResponse = await fetch(`${EMAIL_API_URL}/send-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": EMAIL_API_KEY,
+        },
+        body: JSON.stringify(adminEmailPayload),
+      });
+
+      if (!adminResponse.ok) {
+        console.warn(`Admin email failed: ${adminResponse.statusText}`);
+        // Don't fail the entire process if admin email fails
       }
     }
 
-    this.isProcessing = false;
-  }
-
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  getQueueLength(): number {
-    return this.queue.length;
-  }
-
-  getProcessingStatus(): boolean {
-    return this.isProcessing;
-  }
-}
-
-// Initialize email queue
-const emailQueue = new EmailQueue();
-
-// Use a more flexible type for the transporter
-let transporter: nodemailer.Transporter;
-
-// Enhanced email transporter configuration
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    host: process.env.EMAIL_HOST || "smtp.gmail.com",
-    port: parseInt(process.env.EMAIL_PORT || "587"),
-    secure: process.env.EMAIL_SECURE === "true",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
-    },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 30000,
-    pool: true,
-    maxConnections: 5,
-    maxMessages: 100,
-    rateDelta: 1000,
-    rateLimit: 5,
-  } as SMTPPool.Options);
-};
-
-// Initialize transporter
-transporter = createTransporter();
-
-// Test email configuration on startup
-const testEmailConfig = async () => {
-  try {
-    await transporter.verify();
-    console.log("✅ Email transporter configured successfully");
-    return true;
+    console.log(`✅ Emails sent successfully via API for: ${emailData.email}`);
+    return { success: true, message: "Emails sent successfully" };
   } catch (error) {
-    console.error("❌ Email configuration test failed:", error);
-
-    // Try alternative configuration without pooling
-    try {
-      const fallbackTransporter = nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
-        },
-        connectionTimeout: 15000,
-      });
-
-      await fallbackTransporter.verify();
-      transporter = fallbackTransporter;
-      console.log("✅ Fallback email configuration successful");
-      return true;
-    } catch (fallbackError) {
-      console.error(
-        "❌ Fallback email configuration also failed:",
-        fallbackError
-      );
-      return false;
-    }
-  }
-};
-
-// Initialize email configuration
-testEmailConfig();
-
-// Direct email sending function (used by queue)
-async function sendEmailDirect(emailData: {
-  name: string;
-  email: string;
-  mobile: string;
-  address?: string;
-  paymentId?: string;
-  orderId?: string;
-}) {
-  // Verify transporter is still connected
-  try {
-    await transporter.verify();
-  } catch (error) {
-    console.log("Recreating email transporter...");
-    transporter = createTransporter();
-    await transporter.verify();
-  }
-
-  const mailOptions = {
-    from: `"Python Wizard" <${process.env.EMAIL_USER}>`,
-    to: emailData.email,
-    subject: emailData.paymentId
-      ? "🎉 Payment Confirmed - Welcome to Python Wizard Course!"
-      : "🚀 Welcome to Python Wizard Course!",
-    html: emailData.paymentId
-      ? generatePaymentEmailTemplate(emailData)
-      : generateStudentEmailTemplate(emailData),
-  };
-
-  const adminMailOptions = {
-    from: `"Python Wizard" <${process.env.EMAIL_USER}>`,
-    to: process.env.ADMIN_EMAIL || process.env.EMAIL_USER,
-    subject: emailData.paymentId
-      ? `💰 Payment Received - New Enrollment - ${emailData.name}`
-      : `🎯 New Python Course Enrollment - ${emailData.name}`,
-    html: emailData.paymentId
-      ? generateAdminPaymentEmailTemplate(emailData)
-      : generateAdminEmailTemplate(emailData),
-  };
-
-  // Send emails with individual error handling
-  try {
-    await transporter.sendMail(adminMailOptions);
-    console.log(`📨 Admin notification sent for: ${emailData.email}`);
-  } catch (adminError) {
-    console.error("Failed to send admin email:", adminError);
-    // Don't fail the entire process if admin email fails
-  }
-
-  await transporter.sendMail(mailOptions);
-  console.log(`📨 Welcome email sent to: ${emailData.email}`);
-}
-
-// Queue-based email sending function
-async function sendEmail(emailData: {
-  name: string;
-  email: string;
-  mobile: string;
-  address?: string;
-  paymentId?: string;
-  orderId?: string;
-}) {
-  try {
-    // Add to queue for processing
-    await emailQueue.add({ data: emailData });
-
-    return {
-      success: true,
-      message: "Email queued for delivery",
-      queuePosition: emailQueue.getQueueLength(),
-    };
-  } catch (error) {
-    console.error("Error queuing email:", error);
+    console.error("❌ Email API error:", error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : "Failed to queue email",
+      error: error instanceof Error ? error.message : "Failed to send email via API",
     };
   }
 }
 
-// Email template generators
-function generateAdminEmailTemplate(emailData: {
-  name: string;
-  email: string;
-  mobile: string;
-  address?: string;
-}) {
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #FFD43B; text-align: center;">New Course Enrollment!</h2>
-      <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 4px solid #FFD43B;">
-        <h3 style="color: #333; margin-bottom: 15px;">Student Details:</h3>
-        <p><strong>Name:</strong> ${escapeHtml(emailData.name)}</p>
-        <p><strong>Email:</strong> ${escapeHtml(emailData.email)}</p>
-        <p><strong>Mobile:</strong> ${escapeHtml(emailData.mobile)}</p>
-        ${
-          emailData.address
-            ? `<p><strong>Address:</strong> ${escapeHtml(
-                emailData.address
-              )}</p>`
-            : ""
-        }
-        <p><strong>Enrollment Date:</strong> ${new Date().toLocaleString()}</p>
-        <p><strong>Queue Status:</strong> Processing</p>
-      </div>
-      <div style="margin-top: 20px; text-align: center;">
-        <p style="color: #666;">Course: Python Wizard - Foundation for Data Science & AI/ML</p>
-        <p style="color: #666;">Price: ₹99</p>
-      </div>
-    </div>
-  `;
+// Batch email sending for multiple recipients (if needed in future)
+async function sendBatchEmails(emails: Array<{
+  to: string;
+  subject: string;
+  html: string;
+  priority?: "low" | "normal" | "high";
+}>) {
+  if (!EMAIL_API_KEY) {
+    console.warn("EMAIL_API_KEY not configured, skipping batch emails");
+    return { success: false, error: "Email API not configured" };
+  }
+
+  const results = [];
+
+  for (const email of emails) {
+    try {
+      const response = await fetch(`${EMAIL_API_URL}/send-email`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": EMAIL_API_KEY,
+        },
+        body: JSON.stringify({
+          to: email.to,
+          subject: email.subject,
+          html: email.html,
+          priority: email.priority || "normal",
+        }),
+      });
+
+      results.push({
+        to: email.to,
+        success: response.ok,
+        status: response.status,
+      });
+    } catch (error) {
+      results.push({
+        to: email.to,
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+
+  return results;
 }
 
-function generateAdminPaymentEmailTemplate(emailData: {
-  name: string;
-  email: string;
-  mobile: string;
-  address?: string;
-  paymentId?: string;
-  orderId?: string;
-}) {
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <h2 style="color: #4CAF50; text-align: center;">💰 Payment Received - New Enrollment!</h2>
-      <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; border-left: 4px solid #4CAF50;">
-        <h3 style="color: #333; margin-bottom: 15px;">Student & Payment Details:</h3>
-        <p><strong>Name:</strong> ${escapeHtml(emailData.name)}</p>
-        <p><strong>Email:</strong> ${escapeHtml(emailData.email)}</p>
-        <p><strong>Mobile:</strong> ${escapeHtml(emailData.mobile)}</p>
-        ${
-          emailData.address
-            ? `<p><strong>Address:</strong> ${escapeHtml(
-                emailData.address
-              )}</p>`
-            : ""
-        }
-        <p><strong>Payment ID:</strong> ${emailData.paymentId}</p>
-        <p><strong>Order ID:</strong> ${emailData.orderId}</p>
-        <p><strong>Amount:</strong> ₹99</p>
-        <p><strong>Payment Date:</strong> ${new Date().toLocaleString()}</p>
-      </div>
-      <div style="margin-top: 20px; text-align: center;">
-        <p style="color: #666;">Course: Python Wizard - Foundation for Data Science & AI/ML</p>
-        <p style="color: #4CAF50; font-weight: bold;">Payment Status: ✅ Completed</p>
-      </div>
-    </div>
-  `;
-}
+// Check email queue status
+async function getEmailQueueStatus() {
+  if (!EMAIL_API_KEY) {
+    return null;
+  }
 
-function generateStudentEmailTemplate(emailData: {
-  name: string;
-  email: string;
-  mobile: string;
-  address?: string;
-}) {
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <div style="text-align: center; background: linear-gradient(135deg, #FFD43B, #FFA500); padding: 30px; border-radius: 10px 10px 0 0;">
-        <h1 style="color: white; margin: 0;">Welcome to Python Wizard!</h1>
-        <p style="color: white; font-size: 18px; margin: 10px 0 0 0;">Your journey to Data Science & AI begins now</p>
-      </div>
-      
-      <div style="padding: 30px; background: #f8f9fa;">
-        <h3 style="color: #333;">Hello ${escapeHtml(emailData.name)},</h3>
-        <p style="color: #666; line-height: 1.6;">
-          Thank you for enrolling in our <strong>Python Wizard</strong> course! 
-          We're excited to help you build a solid foundation for your Data Science and AI/ML journey.
-        </p>
-        
-        <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #FFD43B;">
-          <h4 style="color: #333; margin-bottom: 15px;">🎯 Your Enrollment Details:</h4>
-          <p><strong>Course:</strong> Python Wizard - Foundation Program</p>
-          <p><strong>Duration:</strong> 10 Days Intensive Learning</p>
-          <p><strong>Price:</strong> ₹99</p>
-          <p><strong>Enrollment Date:</strong> ${new Date().toLocaleDateString()}</p>
-        </div>
+  try {
+    const response = await fetch(`${EMAIL_API_URL}/queue/stats`, {
+      headers: {
+        "x-api-key": EMAIL_API_KEY,
+      },
+    });
 
-        <div style="background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 20px 0;">
-          <h4 style="color: #2e7d32; margin-bottom: 10px;">📚 What's Next?</h4>
-          <p style="color: #666; margin: 5px 0;">• Complete your payment to activate course access</p>
-          <p style="color: #666; margin: 5px 0;">• You will receive course access within 2 hours of payment</p>
-          <p style="color: #666; margin: 5px 0;">• Check your email for learning materials</p>
-          <p style="color: #666; margin: 5px 0;">• Join our student community for support</p>
-        </div>
-
-        <p style="color: #666; line-height: 1.6;">
-          If you have any questions, feel free to reply to this email. We're here to help you succeed!
-        </p>
-      </div>
-
-      <div style="background: #333; color: white; padding: 20px; text-align: center; border-radius: 0 0 10px 10px;">
-        <p style="margin: 0; font-size: 14px;">Happy Coding! 🐍</p>
-        <p style="margin: 10px 0 0 0; font-size: 12px; color: #ccc;">Python Wizard Team</p>
-      </div>
-    </div>
-  `;
-}
-
-function generatePaymentEmailTemplate(emailData: {
-  name: string;
-  email: string;
-  mobile: string;
-  address?: string;
-  paymentId?: string;
-  orderId?: string;
-}) {
-  return `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-      <div style="text-align: center; background: linear-gradient(135deg, #4CAF50, #45a049); padding: 30px; border-radius: 10px 10px 0 0;">
-        <h1 style="color: white; margin: 0;">Payment Confirmed! 🎉</h1>
-        <p style="color: white; font-size: 18px; margin: 10px 0 0 0;">Welcome to Python Wizard</p>
-      </div>
-      
-      <div style="padding: 30px; background: #f8f9fa;">
-        <h3 style="color: #333;">Hello ${escapeHtml(emailData.name)},</h3>
-        <p style="color: #666; line-height: 1.6;">
-          Your payment has been successfully processed and you're officially enrolled in our <strong>Python Wizard</strong> course!
-        </p>
-        
-        <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4CAF50;">
-          <h4 style="color: #333; margin-bottom: 15px;">📦 Enrollment & Payment Details:</h4>
-          <p><strong>Course:</strong> Python Wizard - Foundation Program</p>
-          <p><strong>Amount Paid:</strong> ₹99</p>
-          <p><strong>Payment ID:</strong> ${emailData.paymentId}</p>
-          <p><strong>Order ID:</strong> ${emailData.orderId}</p>
-          <p><strong>Enrollment Date:</strong> ${new Date().toLocaleDateString()}</p>
-        </div>
-
-        <!-- WhatsApp Join Button -->
-        <div style="text-align: center; margin: 25px 0;">
-          <a href="https://chat.whatsapp.com/HasOdIwY2NuKn97venbCf3?mode=wwt" 
-             style="display: inline-flex; align-items: center; gap: 10px; background: #25D366; color: white; padding: 12px 24px; border-radius: 50px; text-decoration: none; font-weight: bold; transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);"
-             onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 6px 16px rgba(37, 211, 102, 0.4)';"
-             onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 4px 12px rgba(37, 211, 102, 0.3)';">
-            <img src="https://cdn-icons-png.flaticon.com/512/124/124034.png" 
-                 alt="WhatsApp" 
-                 style="width: 24px; height: 24px; filter: brightness(0) invert(1);">
-            Join WhatsApp Group
-          </a>
-          <p style="color: #666; font-size: 14px; margin-top: 10px;">
-            Connect with fellow students and get instant support
-          </p>
-        </div>
-
-        <div style="background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 20px 0;">
-          <h4 style="color: #2e7d32; margin-bottom: 10px;">🚀 What Happens Next?</h4>
-          <p style="color: #666; margin: 5px 0;">• Course access will be activated within 2 hours</p>
-          <p style="color: #666; margin: 5px 0;">• You'll receive learning materials via email</p>
-          <p style="color: #666; margin: 5px 0;">• Join our student community for support</p>
-          <p style="color: #666; margin: 5px 0;">• Schedule your orientation session</p>
-        </div>
-
-        <p style="color: #666; line-height: 1.6;">
-          If you have any questions, reply to this email. We're excited to have you onboard!
-        </p>
-      </div>
-
-      <div style="background: #333; color: white; padding: 20px; text-align: center; border-radius: 0 0 10px 10px;">
-        <p style="margin: 0; font-size: 14px;">Happy Learning! 🐍</p>
-        <p style="margin: 10px 0 0 0; font-size: 12px; color: #ccc;">Python Wizard Team</p>
-      </div>
-    </div>
-  `;
-}
-
-// Security helper function
-function escapeHtml(text: string): string {
-  const map: { [key: string]: string } = {
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  };
-  return text.replace(/[&<>"']/g, (m) => map[m]);
+    if (response.ok) {
+      return await response.json();
+    }
+    return null;
+  } catch (error) {
+    console.error("Error fetching queue stats:", error);
+    return null;
+  }
 }
 
 // Validation functions
@@ -600,10 +322,11 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Send initial enrollment email (without payment confirmation)
-    const isEmailConfigured = process.env.EMAIL_USER && process.env.EMAIL_PASS;
-    if (isEmailConfigured) {
-      await sendEmail(enrollmentData);
+    // Send initial enrollment email via API
+    if (EMAIL_API_KEY) {
+      await sendEmailViaAPI(enrollmentData);
+    } else {
+      console.warn("EMAIL_API_KEY not configured, skipping enrollment email");
     }
 
     const responseData = {
@@ -618,6 +341,7 @@ export async function POST(request: NextRequest) {
         name: enrollmentData.name,
         email: enrollmentData.email,
       },
+      emailSent: !!EMAIL_API_KEY,
     };
 
     return new NextResponse(JSON.stringify(responseData), {
@@ -666,7 +390,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Payment successful - Send confirmation emails
+    // Payment successful - Send confirmation emails via API
     const emailData = {
       name: formData.name,
       email: formData.email,
@@ -676,7 +400,13 @@ export async function PUT(request: NextRequest) {
       orderId: razorpay_order_id,
     };
 
-    const emailResult = await sendEmail(emailData);
+    let emailResult;
+    if (EMAIL_API_KEY) {
+      emailResult = await sendEmailViaAPI(emailData);
+    } else {
+      console.warn("EMAIL_API_KEY not configured, skipping confirmation email");
+      emailResult = { success: false, error: "Email API not configured" };
+    }
 
     // Save payment record (you can implement your database logic here)
     await savePaymentRecord({
@@ -688,6 +418,7 @@ export async function PUT(request: NextRequest) {
       studentEmail: formData.email,
       studentMobile: formData.mobile,
       course: "Python Wizard Course",
+      emailSent: emailResult.success,
     });
 
     return NextResponse.json({
@@ -695,6 +426,7 @@ export async function PUT(request: NextRequest) {
       message: "Payment verified successfully",
       paymentId: razorpay_payment_id,
       emailSent: emailResult.success,
+      queueStats: await getEmailQueueStatus(),
     });
   } catch (error) {
     console.error("Payment verification error:", error);
@@ -712,22 +444,22 @@ async function savePaymentRecord(paymentData: any) {
   return { success: true };
 }
 
-// Health check endpoint
+// Health check endpoint with email API status
 export async function GET() {
-  const isEmailConfigured = !!(
-    process.env.EMAIL_USER && process.env.EMAIL_PASS
-  );
+  const isEmailApiConfigured = !!EMAIL_API_KEY;
   const isRazorpayConfigured = !!(
     process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET
   );
+
+  const queueStats = await getEmailQueueStatus();
 
   return NextResponse.json({
     status: "ok",
     timestamp: new Date().toISOString(),
     email: {
-      configured: isEmailConfigured,
-      queueLength: emailQueue.getQueueLength(),
-      processing: emailQueue.getProcessingStatus(),
+      apiConfigured: isEmailApiConfigured,
+      apiUrl: EMAIL_API_URL,
+      queueStats: queueStats,
     },
     razorpay: {
       configured: isRazorpayConfigured,

@@ -20,14 +20,17 @@ export default function HeroSection() {
     "data = [1, 2, 3, 4, 5]",
   ];
 
+  const pythonPatterns = [
+    "🐍", "📚", "🚀", "⚡", "💻", "🔢", "📊", "🤖",
+    "{}", "[]", "()", ":", "=", "#", "_", "*"
+  ];
+
   const handleClick = () => {
-    // Try both methods
     if (typeof window !== 'undefined') {
       window.location.href = '/enroll';
     }
   };
 
-  // Delay effect for flashing sale text
   useEffect(() => {
     const timer = setTimeout(() => {
       setStrikePrice(false);
@@ -36,7 +39,6 @@ export default function HeroSection() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Generate random positions only on client (after hydration)
   useEffect(() => {
     const randomPositions = codeSnippets.map(() => ({
       top: `${Math.random() * 80}%`,
@@ -47,23 +49,74 @@ export default function HeroSection() {
 
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
-      {/* Background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-b from-[#030712] via-[#0c1b3a] to-[#1e1b4b]" />
+      {/* Enhanced Python-themed Background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-[#306998] via-[#1e1b4b] to-[#4B8BBE]" />
+      
+      {/* Python Logo Pattern Background */}
+      <div className="absolute inset-0 opacity-10">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,_#FFD43B_1px,_transparent_0)] bg-[length:40px_40px] animate-pulse-slow" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_21px_21px,_#306998_1px,_transparent_0)] bg-[length:40px_40px] animate-pulse-slow" style={{animationDelay: '1s'}} />
+      </div>
 
-      {/* Animated Stars Background */}
-      <div className="absolute inset-0">
-        {[...Array(30)].map((_, i) => (
+      {/* Animated Python-themed Elements */}
+      <div className="absolute inset-0 overflow-hidden">
+        {/* Floating Python Logos */}
+        {[...Array(8)].map((_, i) => (
           <div
-            key={i}
-            className="absolute w-1 h-1 bg-white rounded-full animate-pulse"
+            key={`python-${i}`}
+            className="absolute text-2xl opacity-5 animate-float-slow"
             style={{
               top: `${Math.random() * 100}%`,
               left: `${Math.random() * 100}%`,
-              animationDelay: `${i * 0.5}s`,
-              animationDuration: `${2 + Math.random() * 2}s`,
+              animationDelay: `${i * 3}s`,
+              animationDuration: `${20 + i * 2}s`,
             }}
-          />
+          >
+            🐍
+          </div>
         ))}
+
+        {/* Binary Rain Effect */}
+        {[...Array(20)].map((_, i) => (
+          <div
+            key={`binary-${i}`}
+            className="absolute text-[#FFD43B] font-mono text-xs opacity-20 animate-binary-rain"
+            style={{
+              top: '-20px',
+              left: `${(i * 5)}%`,
+              animationDelay: `${i * 0.5}s`,
+              animationDuration: `${15 + Math.random() * 10}s`,
+            }}
+          >
+            {Math.random() > 0.5 ? '1' : '0'}
+          </div>
+        ))}
+
+        {/* Circuit Board Lines */}
+        <div className="absolute inset-0 opacity-5">
+          <div className="absolute top-1/4 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#FFD43B] to-transparent animate-pulse" />
+          <div className="absolute top-1/2 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#306998] to-transparent animate-pulse" style={{animationDelay: '1s'}} />
+          <div className="absolute top-3/4 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#4B8BBE] to-transparent animate-pulse" style={{animationDelay: '2s'}} />
+        </div>
+
+        {/* Geometric Python Patterns */}
+        <div className="absolute inset-0">
+          {[...Array(12)].map((_, i) => (
+            <div
+              key={`pattern-${i}`}
+              className="absolute border border-[#FFD43B] opacity-10 animate-spin-slow"
+              style={{
+                top: `${Math.random() * 100}%`,
+                left: `${Math.random() * 100}%`,
+                width: `${20 + Math.random() * 100}px`,
+                height: `${20 + Math.random() * 100}px`,
+                borderRadius: i % 3 === 0 ? '50%' : '0%',
+                animationDelay: `${i * 2}s`,
+                animationDuration: `${30 + i * 3}s`,
+              }}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Floating code snippets */}
@@ -71,7 +124,7 @@ export default function HeroSection() {
         {codeSnippets.map((code, i) => (
           <div
             key={i}
-            className="absolute text-[#306998] font-mono text-xs md:text-sm opacity-20 animate-drift"
+            className="absolute text-[#306998] font-mono text-xs md:text-sm opacity-30 animate-drift"
             style={{
               top: positions[i]?.top ?? "0%",
               left: positions[i]?.left ?? "0%",
