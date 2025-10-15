@@ -1,8 +1,10 @@
 "use client";
-import { Code, Rocket, Zap, Star, Users, Clock } from "lucide-react";
+import { Code, Rocket, Zap, Star, Users, Clock, Link } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 
 export default function HeroSection() {
+  const router = useRouter();
   const [strikePrice, setStrikePrice] = useState(true);
   const [showFlash, setShowFlash] = useState(false);
   const [positions, setPositions] = useState<{ top: string; left: string }[]>(
@@ -17,6 +19,13 @@ export default function HeroSection() {
     "class SpaceShip:",
     "data = [1, 2, 3, 4, 5]",
   ];
+
+  const handleClick = () => {
+    // Try both methods
+    if (typeof window !== 'undefined') {
+      window.location.href = '/enroll';
+    }
+  };
 
   // Delay effect for flashing sale text
   useEffect(() => {
@@ -142,7 +151,10 @@ export default function HeroSection() {
         {/* Enhanced CTA Buttons */}
         <div className="flex flex-col sm:flex-row gap-4 md:gap-6 justify-center items-center">
           {/* Primary CTA - Neumorphic with Gradient */}
-          <button className="group relative px-8 py-4 md:px-12 md:py-5 bg-gradient-to-r from-[#FFD43B] to-[#FFA500] rounded-2xl font-bold text-gray-900 text-lg transition-all duration-300 hover:scale-105 hover:shadow-2xl active:scale-95 shadow-lg overflow-hidden">
+          <button
+            onClick={handleClick}
+            className="group relative px-8 py-4 md:px-12 md:py-5 bg-gradient-to-r from-[#FFD43B] to-[#FFA500] rounded-2xl font-bold text-gray-900 text-lg transition-all duration-300 hover:scale-105 hover:shadow-2xl active:scale-95 shadow-lg overflow-hidden"
+          >
             {/* Shine effect */}
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -skew-x-12 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000" />
 

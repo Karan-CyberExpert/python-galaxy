@@ -1,6 +1,7 @@
 "use client"
 import { useState, useEffect } from 'react';
 import { Check, Lock, Unlock, Zap, Clock, Rocket, Star, Sparkles, Target } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 export default function PricingSection() {
   const [terminalLines, setTerminalLines] = useState<string[]>([]);
@@ -10,6 +11,7 @@ export default function PricingSection() {
     minutes: 59,
     seconds: 59,
   });
+  const router = useRouter();
 
   useEffect(() => {
     const lines = [
@@ -65,6 +67,13 @@ export default function PricingSection() {
     'Build Real Applications',
     "language hinglish conersational"
   ];
+
+  const handleClick = () => {
+    // Try both methods
+    if (typeof window !== 'undefined') {
+      window.location.href = '/enroll';
+    }
+  };
 
   return (
     <section className="relative py-12 md:py-24 overflow-hidden">
@@ -206,7 +215,7 @@ export default function PricingSection() {
             </div>
 
             {/* CTA Button */}
-            <button className="w-full py-4 bg-gradient-to-r from-[#FFD43B] to-[#FFA500] rounded-xl font-bold text-lg text-gray-900 hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2">
+            <button onClick={handleClick} className="w-full py-4 bg-gradient-to-r from-[#FFD43B] to-[#FFA500] rounded-xl font-bold text-lg text-gray-900 hover:scale-105 transition-all duration-300 flex items-center justify-center gap-2">
               <Unlock className="w-5 h-5" />
               <span>Start Learning Now</span>
             </button>
