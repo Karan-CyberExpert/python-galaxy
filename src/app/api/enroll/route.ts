@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import Razorpay from "razorpay";
 import crypto from "crypto";
-import { generateAdminEmailTemplate, generateAdminPaymentEmailTemplate, generatePaymentEmailTemplate, generateStudentEmailTemplate } from "./email-templates";
+import fs from "fs";
+import path from "path";
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -9,161 +10,86 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET!,
 });
 
-// Email API configuration
-const EMAIL_API_URL = process.env.EMAIL_API_URL || "http://localhost:3000";
-const EMAIL_API_KEY = process.env.EMAIL_API_KEY;
+// JSON file path for storing user data
+const DATA_FILE_PATH = path.join(process.cwd(), 'user-data.json');
 
-// Enhanced email sending function using your API
-async function sendEmailViaAPI(emailData: {
-  name: string;
-  email: string;
-  mobile: string;
-  address?: string;
-  paymentId?: string;
-  orderId?: string;
-}) {
-  if (!EMAIL_API_KEY) {
-    console.warn("EMAIL_API_KEY not configured, skipping email sending");
-    return { success: false, error: "Email API not configured" };
-  }
-
+// Helper functions to manage JSON file
+function readUserData() {
   try {
-    const isPaymentConfirmation = !!emailData.paymentId;
-
-    // Student email
-    const studentEmailPayload = {
-      to: emailData.email,
-      subject: isPaymentConfirmation
-        ? "🎉 Payment Confirmed - Welcome to Python Wizard Course!"
-        : "🚀 Welcome to Python Wizard Course Enrollment!",
-      html: isPaymentConfirmation
-        ? generatePaymentEmailTemplate(emailData)
-        : generateStudentEmailTemplate(emailData),
-      priority: "high",
-    };
-
-    // Admin email
-    const adminEmailPayload = {
-      to: process.env.ADMIN_EMAIL,
-      subject: isPaymentConfirmation
-        ? `💰 Payment Received - New Enrollment - ${emailData.name}`
-        : `🎯 New Python Course Enrollment - ${emailData.name}`,
-      html: isPaymentConfirmation
-        ? generateAdminPaymentEmailTemplate(emailData)
-        : generateAdminEmailTemplate(emailData),
-      priority: "normal",
-    };
-
-    // Send student email
-    const studentResponse = await fetch(`${EMAIL_API_URL}/send-email`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": EMAIL_API_KEY,
-      },
-      body: JSON.stringify(studentEmailPayload),
-    });
-
-    if (!studentResponse.ok) {
-      throw new Error(`Student email failed: ${studentResponse.statusText}`);
+    if (!fs.existsSync(DATA_FILE_PATH)) {
+      return { enrollments: [], payments: [] };
     }
-
-    // Send admin email if admin email is configured
-    if (process.env.ADMIN_EMAIL) {
-      const adminResponse = await fetch(`${EMAIL_API_URL}/send-email`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": EMAIL_API_KEY,
-        },
-        body: JSON.stringify(adminEmailPayload),
-      });
-
-      if (!adminResponse.ok) {
-        console.warn(`Admin email failed: ${adminResponse.statusText}`);
-        // Don't fail the entire process if admin email fails
-      }
-    }
-
-    console.log(`✅ Emails sent successfully via API for: ${emailData.email}`);
-    return { success: true, message: "Emails sent successfully" };
+    const data = fs.readFileSync(DATA_FILE_PATH, 'utf-8');
+    return JSON.parse(data);
   } catch (error) {
-    console.error("❌ Email API error:", error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Failed to send email via API",
-    };
+    console.error('Error reading user data:', error);
+    return { enrollments: [], payments: [] };
   }
 }
 
-// Batch email sending for multiple recipients (if needed in future)
-async function sendBatchEmails(emails: Array<{
-  to: string;
-  subject: string;
-  html: string;
-  priority?: "low" | "normal" | "high";
-}>) {
-  if (!EMAIL_API_KEY) {
-    console.warn("EMAIL_API_KEY not configured, skipping batch emails");
-    return { success: false, error: "Email API not configured" };
-  }
-
-  const results = [];
-
-  for (const email of emails) {
-    try {
-      const response = await fetch(`${EMAIL_API_URL}/send-email`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": EMAIL_API_KEY,
-        },
-        body: JSON.stringify({
-          to: email.to,
-          subject: email.subject,
-          html: email.html,
-          priority: email.priority || "normal",
-        }),
-      });
-
-      results.push({
-        to: email.to,
-        success: response.ok,
-        status: response.status,
-      });
-    } catch (error) {
-      results.push({
-        to: email.to,
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      });
+function writeUserData(data: any) {
+  try {
+    const dir = path.dirname(DATA_FILE_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
+    fs.writeFileSync(DATA_FILE_PATH, JSON.stringify(data, null, 2));
+    return true;
+  } catch (error) {
+    console.error('Error writing user data:', error);
+    return false;
   }
-
-  return results;
 }
 
-// Check email queue status
-async function getEmailQueueStatus() {
-  if (!EMAIL_API_KEY) {
-    return null;
+function saveEnrollment(enrollmentData: any) {
+  const data = readUserData();
+  const enrollment = {
+    id: `ENR${Date.now()}`,
+    ...enrollmentData,
+    createdAt: new Date().toISOString(),
+    status: 'pending_payment'
+  };
+  
+  data.enrollments.push(enrollment);
+  const success = writeUserData(data);
+  
+  if (success) {
+    console.log(`✅ Enrollment saved: ${enrollment.id} for ${enrollmentData.email}`);
   }
+  
+  return { success, enrollmentId: enrollment.id };
+}
 
-  try {
-    const response = await fetch(`${EMAIL_API_URL}/queue/stats`, {
-      headers: {
-        "x-api-key": EMAIL_API_KEY,
-      },
-    });
-
-    if (response.ok) {
-      return await response.json();
-    }
-    return null;
-  } catch (error) {
-    console.error("Error fetching queue stats:", error);
-    return null;
+function savePayment(paymentData: any) {
+  const data = readUserData();
+  const payment = {
+    id: `PAY${Date.now()}`,
+    ...paymentData,
+    paidAt: new Date().toISOString(),
+    status: 'completed'
+  };
+  
+  data.payments.push(payment);
+  
+  // Update corresponding enrollment status
+  const enrollment = data.enrollments.find((e: any) => 
+    e.email === paymentData.studentEmail && e.status === 'pending_payment'
+  );
+  
+  if (enrollment) {
+    enrollment.status = 'completed';
+    enrollment.paymentId = paymentData.paymentId;
+    enrollment.orderId = paymentData.orderId;
+    enrollment.completedAt = new Date().toISOString();
   }
+  
+  const success = writeUserData(data);
+  
+  if (success) {
+    console.log(`✅ Payment saved: ${payment.id} for ${paymentData.studentEmail}`);
+  }
+  
+  return { success, paymentId: payment.id };
 }
 
 // Validation functions
@@ -306,8 +232,21 @@ export async function POST(request: NextRequest) {
       mobile: mobile.replace(/\D/g, ""), // Clean mobile number
       email: email.trim().toLowerCase(),
       address: address ? address.trim() : "",
-      enrolledAt: new Date().toISOString(),
     };
+
+    // Save enrollment to JSON file
+    const saveResult = saveEnrollment(enrollmentData);
+    
+    if (!saveResult.success) {
+      console.error("Failed to save enrollment data");
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Failed to save enrollment data",
+        },
+        { status: 500 }
+      );
+    }
 
     // Create Razorpay Order
     const order = await razorpay.orders.create({
@@ -319,15 +258,9 @@ export async function POST(request: NextRequest) {
         email: enrollmentData.email,
         mobile: enrollmentData.mobile,
         course: "Python Wizard Course",
+        enrollmentId: saveResult.enrollmentId,
       },
     });
-
-    // Send initial enrollment email via API
-    if (EMAIL_API_KEY) {
-      await sendEmailViaAPI(enrollmentData);
-    } else {
-      console.warn("EMAIL_API_KEY not configured, skipping enrollment email");
-    }
 
     const responseData = {
       success: true,
@@ -341,7 +274,8 @@ export async function POST(request: NextRequest) {
         name: enrollmentData.name,
         email: enrollmentData.email,
       },
-      emailSent: !!EMAIL_API_KEY,
+      enrollmentId: saveResult.enrollmentId,
+      dataSaved: true,
     };
 
     return new NextResponse(JSON.stringify(responseData), {
@@ -364,7 +298,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Verify Payment and Send Confirmation Email
+// Verify Payment and Save Payment Data
 export async function PUT(request: NextRequest) {
   try {
     const {
@@ -390,43 +324,38 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Payment successful - Send confirmation emails via API
-    const emailData = {
-      name: formData.name,
-      email: formData.email,
-      mobile: formData.mobile,
-      address: formData.address,
-      paymentId: razorpay_payment_id,
-      orderId: razorpay_order_id,
-    };
-
-    let emailResult;
-    if (EMAIL_API_KEY) {
-      emailResult = await sendEmailViaAPI(emailData);
-    } else {
-      console.warn("EMAIL_API_KEY not configured, skipping confirmation email");
-      emailResult = { success: false, error: "Email API not configured" };
-    }
-
-    // Save payment record (you can implement your database logic here)
-    await savePaymentRecord({
+    // Payment successful - Save payment record
+    const paymentData = {
       orderId: razorpay_order_id,
       paymentId: razorpay_payment_id,
       amount: 99.0,
-      status: "completed",
+      currency: "INR",
       studentName: formData.name,
       studentEmail: formData.email,
       studentMobile: formData.mobile,
+      studentAddress: formData.address,
       course: "Python Wizard Course",
-      emailSent: emailResult.success,
-    });
+    };
+
+    const saveResult = savePayment(paymentData);
+
+    if (!saveResult.success) {
+      console.error("Failed to save payment data");
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Payment verified but failed to save data",
+        },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       success: true,
-      message: "Payment verified successfully",
+      message: "Payment verified and data saved successfully",
       paymentId: razorpay_payment_id,
-      emailSent: emailResult.success,
-      queueStats: await getEmailQueueStatus(),
+      dataSaved: true,
+      paymentRecordId: saveResult.paymentId,
     });
   } catch (error) {
     console.error("Payment verification error:", error);
@@ -437,33 +366,36 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-// Optional: Save payment record
-async function savePaymentRecord(paymentData: any) {
-  // Implement your database logic here
-  console.log("Payment record saved:", paymentData);
-  return { success: true };
-}
-
-// Health check endpoint with email API status
+// Get enrollment and payment statistics
 export async function GET() {
-  const isEmailApiConfigured = !!EMAIL_API_KEY;
-  const isRazorpayConfigured = !!(
-    process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET
-  );
+  try {
+    const data = readUserData();
+    const totalEnrollments = data.enrollments.length;
+    const completedPayments = data.payments.length;
+    const pendingEnrollments = data.enrollments.filter((e: any) => e.status === 'pending_payment').length;
 
-  const queueStats = await getEmailQueueStatus();
-
-  return NextResponse.json({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    email: {
-      apiConfigured: isEmailApiConfigured,
-      apiUrl: EMAIL_API_URL,
-      queueStats: queueStats,
-    },
-    razorpay: {
-      configured: isRazorpayConfigured,
-    },
-    environment: process.env.NODE_ENV || "development",
-  });
+    return NextResponse.json({
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      statistics: {
+        totalEnrollments,
+        completedPayments,
+        pendingEnrollments,
+      },
+      dataFile: DATA_FILE_PATH,
+      razorpay: {
+        configured: !!(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET),
+      },
+      environment: process.env.NODE_ENV || "development",
+    });
+  } catch (error) {
+    console.error("Error in GET endpoint:", error);
+    return NextResponse.json(
+      {
+        status: "error",
+        message: "Failed to retrieve statistics",
+      },
+      { status: 500 }
+    );
+  }
 }
