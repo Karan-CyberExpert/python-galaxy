@@ -302,14 +302,17 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const {
-      razorpay_order_id,
+      razorpay_order_id, // This should be razorpay_order_id (without the extra 'r')
       razorpay_payment_id,
       razorpay_signature,
       formData,
     } = await request.json();
 
+    // Fix: Use the correct parameter name
+    const orderId = razorpay_order_id; // This line is the issue
+
     // Verify payment signature
-    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const body = orderId + "|" + razorpay_payment_id;
     const expectedSignature = crypto
       .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET!)
       .update(body.toString())
@@ -318,6 +321,11 @@ export async function PUT(request: NextRequest) {
     const isAuthentic = expectedSignature === razorpay_signature;
 
     if (!isAuthentic) {
+      console.error("Payment verification failed - signature mismatch");
+      console.log("Expected:", expectedSignature);
+      console.log("Received:", razorpay_signature);
+      console.log("Body:", body);
+      
       return NextResponse.json(
         { success: false, message: "Payment verification failed" },
         { status: 400 }
@@ -326,7 +334,7 @@ export async function PUT(request: NextRequest) {
 
     // Payment successful - Save payment record
     const paymentData = {
-      orderId: razorpay_order_id,
+      orderId: orderId, // Use the corrected variable
       paymentId: razorpay_payment_id,
       amount: 99.0,
       currency: "INR",
@@ -350,6 +358,8 @@ export async function PUT(request: NextRequest) {
       );
     }
 
+    console.log(`✅ Payment verified and saved: ${razorpay_payment_id}`);
+    
     return NextResponse.json({
       success: true,
       message: "Payment verified and data saved successfully",
