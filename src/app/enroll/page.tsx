@@ -14,6 +14,7 @@ import {
   Target,
   CheckCircle,
   Loader,
+  Calendar,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
@@ -200,6 +201,7 @@ export default function EnrollPage() {
     { icon: <Clock className="w-4 h-4" />, text: "10 Days Learning" },
     { icon: <Target className="w-4 h-4" />, text: "Data Science & AI/ML Foundation" },
     { icon: <Rocket className="w-4 h-4" />, text: "Quick to Advanced" },
+    { icon: <Calendar className="w-4 h-4" />, text: "Join Us for New Classes This October 22–31" }
   ];
 
   // More compact payment steps for mobile

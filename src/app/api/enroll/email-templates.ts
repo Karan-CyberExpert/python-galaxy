@@ -139,7 +139,7 @@ export const generatePaymentEmailTemplate = (emailData: {
         </div>
 
         <div style="text-align: center; margin: 25px 0;">
-          <a href="https://chat.whatsapp.com/HasOdIwY2NuKn97venbCf3?mode=wwt" 
+          <a href="https://chat.whatsapp.com/F5gOiysIWwb2Sm3WyRqDGT" 
              style="display: inline-flex; align-items: center; gap: 10px; background: #25D366; color: white; padding: 12px 24px; border-radius: 50px; text-decoration: none; font-weight: bold; transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(37, 211, 102, 0.3);"
              onmouseover="this.style.transform='scale(1.05)'; this.style.boxShadow='0 6px 16px rgba(37, 211, 102, 0.4)';"
              onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='0 4px 12px rgba(37, 211, 102, 0.3)';">

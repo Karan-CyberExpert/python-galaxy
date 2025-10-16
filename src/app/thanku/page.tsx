@@ -36,7 +36,7 @@ function ThankYouContent() {
     });
   }, [searchParams]);
 
-  const whatsappGroupLink = "https://chat.whatsapp.com/HasOdIwY2NuKn97venbCf3?mode=wwt";
+  const whatsappGroupLink = "https://chat.whatsapp.com/F5gOiysIWwb2Sm3WyRqDGT";
 
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-8 sm:pt-0">
